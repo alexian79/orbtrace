@@ -116,7 +116,7 @@ module dbgIF #(parameter CLK_FREQ=100000000, parameter DEFAULT_SWCLK=1000000, pa
 
    parameter TICKS_PER_USEC=CLK_FREQ/1000000;
    parameter DEFAULT_IF_TICKS_PER_CLK=((CLK_FREQ+(DEFAULT_SWCLK>>1))/(DEFAULT_SWCLK<<1))-1;
-   parameter MIN_IDLE_CYCLES=2;
+   parameter MIN_IDLE_CYCLES=16;
 
    // JTAG DAP Registers
    parameter JTAG_UNKNOWN    = 4'h0;

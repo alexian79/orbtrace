@@ -65,7 +65,7 @@ def main():
     parser.set_defaults(**Platform.get_profile(args.profile))
 
     args = parser.parse_args()
-
+    print (args)
     platform = Platform(
         device = args.device,
         #toolchain = 'trellis',
@@ -76,7 +76,6 @@ def main():
 
     if not args.soc_csv:
         args.soc_csv = Path(args.output_dir) / 'gateware' / 'csr.csv'
-
     soc = OrbSoC(
         platform = platform,
         sys_clk_freq  = int(float(args.sys_clk_freq)),

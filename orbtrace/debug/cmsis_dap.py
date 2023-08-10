@@ -1333,7 +1333,7 @@ class CMSIS_DAP(Elaboratable):
                 self.RESP_Invalid(m)
 
     #########################################################################################
-
+            m.d.sync += self.can.eq(1)
             # Cases for individual process handlers
             # -------------------------------------
             with m.State('DAP_SWJ_Pins_PROCESS'):
@@ -1352,6 +1352,7 @@ class CMSIS_DAP(Elaboratable):
               self.RESP_Transfer_Process(m)
 
             with m.State('DAP_TransferBlock_PROCESS'):
+              m.d.sync += self.can.eq(0)
               self.RESP_TransferBlock_Process(m)
 
             with m.State('DAP_Sequence_PROCESS'):
