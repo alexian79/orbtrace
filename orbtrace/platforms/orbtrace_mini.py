@@ -7,6 +7,7 @@ from litex.soc.cores.bitbang import I2CMaster
 from ..crg_ecp5 import CRG
 
 from litespi.opcodes import SpiNorFlashOpCodes as Codes
+from ..wb_streamer import StreamReader, StreamWriter, StreamBuffers
 from ..flash_modules import S25FL064L
 
 from ..hyperram import HyperRAM
@@ -185,9 +186,21 @@ class Platform(LatticePlatform):
             'hr2x_90': 'sys2x_90',
         })
 
+        # HyperRAM
         pads = self.request('hyperram')
+                
+        soc.submodules.writer = writer = StreamWriter()
+        soc.submodules.reader = reader = StreamReader()
 
-        soc.submodules.hyperram = cdr(HyperRAM(pads))
+        # Attach a StreamBuffer module to handle buffering of frames
+        soc.submodules.buffers = buffers = StreamBuffers()
+        soc.comb += [
+            buffers.rx_release.eq(reader.evt_done),
+            reader.start_address.eq(buffers.rx_buffer),
+            writer.start_address.eq(buffers.tx_buffer),
+        ]
+
+        soc.submodules.hyperram = cdr(HyperRAM(pads, devices=[reader, writer]))
         soc.add_csr('hyperram')
         soc.register_mem('hyperram', soc.mem_map.get('hyperram', 0x20000000), soc.hyperram.bus, size = 0x800000)
 

@@ -42,6 +42,7 @@ from .microsoft_wcid import DeviceDescriptorCollection, PlatformDescriptorCollec
 from litex.soc.interconnect import stream
 from litex.soc.interconnect.stream import Endpoint, Pipeline, AsyncFIFO, ClockDomainCrossing, Converter, Multiplexer, Demultiplexer
 from litex.soc.interconnect.axi import AXILiteInterface, AXILiteClockDomainCrossing
+from litex.soc.interconnect.axi import AXIInterface
 
 from litespi.phy.generic import LiteSPIPHY
 from litespi import LiteSPI
@@ -136,14 +137,16 @@ class OrbSoC(SoCCore):
         # USB Bridge
         self.add_usb_bridge()
 
+        remap_trace2dap = False
+        
         # Trace
         if with_trace:
-            self.add_trace()
+            self.add_trace(remap_trace2dap=remap_trace2dap)
 
         # Debug
         if with_debug:
             self.add_debug()
-            self.add_cmsis_dap()
+            self.add_cmsis_dap(remap_trace2dap=remap_trace2dap)
 
         # Target power
         if with_target_power:
@@ -296,7 +299,7 @@ class OrbSoC(SoCCore):
         # SWO
         self.comb += self.trace.swo.eq(self.dbgif.swo)
 
-    def add_cmsis_dap(self, with_v1 = True, with_v2 = True):
+    def add_cmsis_dap(self, with_v1 = True, with_v2 = True, remap_trace2dap=False):
         # CMSIS-DAP.
         self.submodules.cmsis_dap = CMSIS_DAP(self.dbgif, wrapper = self.wrapper)
 
@@ -363,6 +366,7 @@ class OrbSoC(SoCCore):
             if_num = self.usb_alloc.interface(guid_discriminator=v2_GUID)
             in_ep_num = self.usb_alloc.in_ep()
             out_ep_num = self.usb_alloc.out_ep()
+            trace_ep_num = self.usb_alloc.in_ep()
 
             # USB descriptors.
             with self.usb_conf_desc.InterfaceDescriptor() as i:
@@ -381,6 +385,10 @@ class OrbSoC(SoCCore):
                 with i.EndpointDescriptor() as e:
                     e.bEndpointAddress = 0x80 | in_ep_num
                     e.wMaxPacketSize   = 512
+                
+                with i.EndpointDescriptor() as e:
+                    e.bEndpointAddress = 0x80 | trace_ep_num
+                    e.wMaxPacketSize   = 512
 
             # Endpoint handlers.
             in_ep_v2 = USBStreamInEndpoint(
@@ -394,6 +402,15 @@ class OrbSoC(SoCCore):
                 max_packet_size = 512,
             )
             self.usb.add_endpoint(out_ep_v2)
+
+            in_trace_ep_v2 = USBStreamInEndpoint(
+                endpoint_number = trace_ep_num,
+                max_packet_size = 512,
+            )
+            self.usb.add_endpoint(in_trace_ep_v2)
+            if remap_trace2dap:
+                pipeline = Pipeline(self.trace, self.trace2usb_cdc, in_trace_ep_v2)
+                self.submodules += pipeline
 
         # Stream CDC.
         stream_desc = [('data', 8)]
@@ -458,7 +475,7 @@ class OrbSoC(SoCCore):
                 is_v2.eq(1),
             ]
 
-    def add_trace(self):
+    def add_trace(self, remap_trace2dap=False):
         # Trace core.
         self.submodules.trace = TraceCore(self.platform)
 
@@ -525,9 +542,12 @@ class OrbSoC(SoCCore):
         self.usb.add_endpoint(ep)
 
         cdc = ClockDomainCrossing(ep.sink.description, 'sys', 'usb', depth = 8)
+        self.trace2usb_cdc = cdc
         
-        pipeline = Pipeline(self.trace, cdc, ep)
-        self.submodules += cdc, pipeline
+        self.submodules += cdc
+        if not remap_trace2dap:
+            pipeline = Pipeline(self.trace, cdc, ep)
+            self.submodules += pipeline
 
     def add_test_io(self):
         debug = self.platform.request('debug')
