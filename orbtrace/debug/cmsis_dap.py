@@ -22,12 +22,13 @@ DAP_PROTOCOL_STRING_LEN  = 5
 DAP_PROTOCOL_STRING      = Cat(C(DAP_PROTOCOL_STRING_LEN+1,8),C(ord('2'),8),C(ord('.'),8),C(ord('1'),8),C(ord('.'),8),C(ord('0'),8),C(0,8)) # Protocol version V2.1.0
 DAP_VERSION_STRING_LEN   = len(get_version().encode('utf-8'))
 DAP_VERSION_STRING       = Cat(C(DAP_VERSION_STRING_LEN+1,8), *(C(c, 8) for c in get_version().encode('utf-8')), C(0,8))
-DAP_CAPABILITIES         = 0x03             # JTAG and SWD Debug
+DAP_CAPABILITIES         = (0x03 | (1<<6) | (1<<2) | (1<<3))             # JTAG and SWD Debug
 DAP_TD_TIMER_FREQ        = 0x3B9ACA00       # 1uS resolution timer
 DAP_MAX_PACKET_COUNT     = 1                # 1 max packet count
 DAP_V1_MAX_PACKET_SIZE   = 64
 DAP_V2_MAX_PACKET_SIZE   = 508
 MAX_MSG_LEN              = DAP_V2_MAX_PACKET_SIZE
+DAP_SWO_BUFFER_SIZE      = (64 * 1024) 
 
 # CMSIS-DAP Protocol Messages
 # ===========================
@@ -61,6 +62,7 @@ DAP_SWO_ExtendedStatus   = 0x1e
 DAP_ExecuteCommands      = 0x7f
 
 DAP_QueueCommands        = 0x7e
+DAP_Ok                   = 0x00
 DAP_Invalid              = 0xff
 
 # Commands to the dbgIF
@@ -230,6 +232,22 @@ class CMSIS_DAP(Elaboratable):
         ]
         m.next = 'RESPOND'
     # ----------------------------------------------------------------------------------
+    def RESP_Ok(self, m):
+        # Simply transmit an 'ok' packet back
+        m.d.sync += [
+            self.txBlock.word_select(1,8).eq(C(DAP_Ok,8)),
+            self.txLen.eq(2)
+        ]
+        m.next = 'RESPOND'
+    # ----------------------------------------------------------------------------------
+    def RESP_SWO_Baudrate(self, m):
+        # Simulate OK, with same baudrate
+        m.d.sync += [
+            self.txBlock[8:8+32].eq(self.rxBlock[8:8+32]),
+            self.txLen.eq(5)
+        ]
+        m.next = 'RESPOND'
+    # ----------------------------------------------------------------------------------
     def RESP_Info(self, m):
         # <b:0x00> <b:requestId>
         # Transmit requested information packet back
@@ -248,16 +266,18 @@ class CMSIS_DAP(Elaboratable):
                 m.d.sync += [ self.txLen.eq(3+DAP_VERSION_STRING_LEN),
                               self.txBlock.bit_select(8,8+(2+DAP_VERSION_STRING_LEN)*8).eq(DAP_VERSION_STRING)  ]
             with m.Case(0xF0): # Get information about the Capabilities (BYTE) of the Debug Unit
-                m.d.sync+=[self.txLen.eq(3), self.txBlock[8:24].eq(Cat(C(1,8),C(DAP_CAPABILITIES,8)))]
+                m.d.sync+=[self.txLen.eq(4), self.txBlock[8:32].eq(Cat(C(2,8),C(DAP_CAPABILITIES,16)))]
             with m.Case(0xF1): # Get the Test Domain Timer parameter information
                 m.d.sync+=[self.txLen.eq(6), self.txBlock[8:56].eq(Cat(C(8,8),C(DAP_TD_TIMER_FREQ,32)))]
             with m.Case(0xFE): # Get the maximum Packet Count (BYTE)
                 m.d.sync+=[self.txLen.eq(6), self.txBlock[8:24].eq(Cat(C(1,8),C(DAP_MAX_PACKET_COUNT,8)))]
+            with m.Case(0xFD): # Get the SWO buffer size (WORD)
+                m.d.sync+=[self.txLen.eq(6), self.txBlock[8:56].eq(Cat(C(4,8),C(DAP_SWO_BUFFER_SIZE,32)))]
             with m.Case(0xFF): # Get the maximum Packet Size (SHORT).
                 with m.If(self.isV2):
-                    m.d.sync+=[self.txLen.eq(6), self.txBlock[8:32].eq(Cat(C(2,8),C(DAP_V2_MAX_PACKET_SIZE,16)))]
+                    m.d.sync+=[self.txLen.eq(4), self.txBlock[8:32].eq(Cat(C(2,8),C(DAP_V2_MAX_PACKET_SIZE,16)))]
                 with m.Else():
-                    m.d.sync+=[self.txLen.eq(6), self.txBlock[8:32].eq(Cat(C(2,8),C(DAP_V1_MAX_PACKET_SIZE,16)))]
+                    m.d.sync+=[self.txLen.eq(4), self.txBlock[8:32].eq(Cat(C(2,8),C(DAP_V1_MAX_PACKET_SIZE,16)))]
             with m.Default():
                 m.next = 'Error'
     # ----------------------------------------------------------------------------------
@@ -1297,6 +1317,17 @@ class CMSIS_DAP(Elaboratable):
                     # SWO Commands
                     # ============
                     # All SWO commands are ignored to create an INVALID response
+                    with m.Case(DAP_SWO_Transport):
+                       self.RESP_Ok(m)
+
+                    with m.Case(DAP_SWO_Mode):
+                        self.RESP_Ok(m)
+
+                    with m.Case(DAP_SWO_Baudrate):
+                        self.RESP_SWO_Baudrate(m)
+
+                    with m.Case(DAP_SWO_Control):
+                        self.RESP_Ok(m)
 
                     # JTAG Commands
                     # =============
